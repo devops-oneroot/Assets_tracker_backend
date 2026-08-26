@@ -26,17 +26,26 @@ export function signSession(res: Response): void {
     expiresIn: `${env.auth.sessionHours}h`,
   });
 
-  res.cookie(COOKIE, token, {
-    httpOnly: true, // JavaScript cannot read it, so XSS cannot steal the session
-    sameSite: "lax",
-    secure: env.nodeEnv === "production",
-    maxAge: env.auth.sessionHours * 60 * 60 * 1000,
+  res.cookie(COOKIE, token, { ...cookieOptions(), maxAge: env.auth.sessionHours * 3600_000 });
+}
+
+/**
+ * SameSite=None is what lets the cookie travel from the Vercel frontend to this
+ * API, and browsers only accept None together with Secure. Locally both sides
+ * are http://localhost, which is same-site, so Lax is correct there.
+ */
+function cookieOptions() {
+  return {
+    httpOnly: true as const, // JavaScript cannot read it, so XSS cannot steal it
+    sameSite: env.crossSite ? ("none" as const) : ("lax" as const),
+    secure: env.crossSite || env.nodeEnv === "production",
     path: "/",
-  });
+  };
 }
 
 export function clearSession(res: Response): void {
-  res.clearCookie(COOKIE, { path: "/" });
+  // Must match the attributes used when setting it, or the browser keeps it.
+  res.clearCookie(COOKIE, cookieOptions());
 }
 
 export function isAuthenticated(req: Request): boolean {

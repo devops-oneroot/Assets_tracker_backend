@@ -13,6 +13,22 @@ function required(key: string): string {
   return value.trim();
 }
 
+const clientOrigins = (process.env.CLIENT_ORIGIN ?? "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+/**
+ * True when the browser will be on a different site from this API — the frontend
+ * is served over https from another domain (Vercel) while the API is elsewhere
+ * (Render). A SameSite=Lax cookie is silently dropped on such requests, so the
+ * session cookie has to become SameSite=None; Secure.
+ *
+ * Derived from CLIENT_ORIGIN rather than NODE_ENV, because NODE_ENV is not
+ * reliably set on the host and getting this wrong breaks login with no error.
+ */
+const crossSite = clientOrigins.some((o) => o.startsWith("https://"));
+
 export const env = {
   port: Number(process.env.PORT ?? 5000),
   nodeEnv: process.env.NODE_ENV ?? "development",
@@ -22,10 +38,8 @@ export const env = {
     secretAccessKey: required("AWS_SECRET_ACCESS_KEY"),
     table: required("DYNAMODB_TABLE"),
   },
-  clientOrigins: (process.env.CLIENT_ORIGIN ?? "http://localhost:3000")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean),
+  clientOrigins,
+  crossSite,
   auth: {
     password: required("APP_PASSWORD"),
     jwtSecret: required("JWT_SECRET"),

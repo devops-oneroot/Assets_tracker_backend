@@ -10,6 +10,11 @@ import { errorHandler, notFound } from "./middleware/errorHandler";
 
 const app = express();
 
+// Render (and most hosts) terminate TLS at a proxy, so the app sees plain http.
+// Without this, req.secure and req.ip report the proxy's view rather than the
+// client's.
+app.set("trust proxy", 1);
+
 app.use(
   cors({
     origin: env.clientOrigins,
