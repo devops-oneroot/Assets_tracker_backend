@@ -1,0 +1,45 @@
+# Render Blueprint for the asset register API.
+#
+# The build must install devDependencies: TypeScript and every @types/* package
+# live there, and `tsc` cannot compile without them. Render sets
+# NODE_ENV=production for Node services, which makes plain `npm install` skip
+# devDependencies — hence the explicit --include=dev.
+#
+# `dist/` is gitignored, so the compiled output only exists if this build runs.
+services:
+  - type: web
+    name: assets-tracker-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      # Render injects PORT itself; the app reads it.
+      - key: NODE_ENV
+        value: production
+
+      # Point this at the deployed frontend, or the browser will be blocked by
+      # CORS and the session cookie will not be sent.
+      - key: CLIENT_ORIGIN
+        sync: false
+
+      # --- set these in the Render dashboard, never in the repo ---
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: DYNAMODB_TABLE
+        sync: false
+      - key: CLOUD_NAME
+        sync: false
+      - key: CLOUD_API_KEY
+        sync: false
+      - key: CLOUD_API_SECRET
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
