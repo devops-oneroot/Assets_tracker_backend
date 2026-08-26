@@ -1,23 +1,28 @@
 # Render Blueprint for the asset register API.
 #
-# The build must install devDependencies: TypeScript and every @types/* package
-# live there, and `tsc` cannot compile without them. Render sets
-# NODE_ENV=production for Node services, which makes plain `npm install` skip
-# devDependencies — hence the explicit --include=dev.
+# The compile is driven by the `postinstall` script in package.json, so it runs
+# whatever build command is configured — including Render's dashboard default of
+# plain `npm install`. That matters because a manually created service ignores
+# this file entirely.
 #
-# `dist/` is gitignored, so the compiled output only exists if this build runs.
+# --include=dev is kept explicit here: TypeScript and every @types/* package are
+# devDependencies, and `tsc` cannot compile without them.
+#
+# `dist/` is gitignored, so the compiled output only exists if the build runs.
 services:
   - type: web
     name: assets-tracker-api
     runtime: node
     plan: free
-    buildCommand: npm ci --include=dev && npm run build
+    buildCommand: npm ci --include=dev
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       # Render injects PORT itself; the app reads it.
-      - key: NODE_ENV
-        value: production
+      # Deliberately NOT setting NODE_ENV=production: that makes npm skip
+      # devDependencies, which would leave postinstall without a compiler.
+      - key: NODE_VERSION
+        value: "22"
 
       # Point this at the deployed frontend, or the browser will be blocked by
       # CORS and the session cookie will not be sent.
