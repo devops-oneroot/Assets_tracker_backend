@@ -65,7 +65,8 @@ export interface AssetRaw {
   /** 💳 When the invoice was actually paid */
   paymentDate: Date | null;
   /** 🧾 Purchase invoice */
-  purchaseInvoice: StoredFileDoc | null;
+  /** 🧾 Purchase invoices — first is the one shown wherever a single file fits */
+  purchaseInvoices: StoredFileDoc[];
   invoiceNumber: string;
   vendor: string;
   purchaseCost: number;
@@ -95,7 +96,7 @@ export interface AssetRaw {
   warranty: {
     provider: string;
     expiryDate: Date | null;
-    document: StoredFileDoc | null;
+    documents: StoredFileDoc[];
   };
 
   /** ✅ Physical verification, 📸 verification photo */
@@ -147,6 +148,21 @@ function asFile(value: unknown): StoredFileDoc | null {
   };
 }
 
+/**
+ * Reads a file list, falling back to the older single-file attribute.
+ *
+ * Records written before these fields became lists still carry the singular
+ * value, so this keeps them readable with no migration; the next save rewrites
+ * them as an array.
+ */
+function fileList(many: unknown, single: unknown): StoredFileDoc[] {
+  if (Array.isArray(many)) {
+    return many.map(asFile).filter((f): f is StoredFileDoc => !!f);
+  }
+  const one = asFile(single);
+  return one ? [one] : [];
+}
+
 function asArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
     ? (value.filter((v) => v && typeof v === "object") as Record<string, unknown>[])
@@ -178,7 +194,7 @@ export function normalizeAsset(raw: Record<string, unknown>): AssetRaw {
 
     purchaseDate: asDate(raw.purchaseDate),
     paymentDate: asDate(raw.paymentDate),
-    purchaseInvoice: asFile(raw.purchaseInvoice),
+    purchaseInvoices: fileList(raw.purchaseInvoices, raw.purchaseInvoice),
     invoiceNumber: str(raw.invoiceNumber),
     vendor: str(raw.vendor),
     purchaseCost: num(raw.purchaseCost),
@@ -215,7 +231,7 @@ export function normalizeAsset(raw: Record<string, unknown>): AssetRaw {
     warranty: {
       provider: str(war.provider),
       expiryDate: asDate(war.expiryDate),
-      document: asFile(war.document),
+      documents: fileList(war.documents, war.document),
     },
 
     physicalVerification: {
@@ -304,7 +320,22 @@ export function parseId(id: string): { entity: string; assetCode: string } {
  * The API response shape. `_id` is the composite key so the frontend keeps using
  * a single opaque identifier for routes and links.
  */
-export function toApi<T extends AssetRaw>(asset: T): T & { _id: string; id: string } {
+export function toApi<T extends AssetRaw>(
+  asset: T
+): T & {
+  _id: string;
+  id: string;
+  purchaseInvoice: StoredFileDoc | null;
+  warranty: T["warranty"] & { document: StoredFileDoc | null };
+} {
   const id = makeId(asset.entity, asset.assetCode);
-  return { ...asset, _id: id, id };
+  // The singular forms are derived, not stored: anything that wants one file
+  // (PDF, Excel, the old detail rows) reads these rather than indexing arrays.
+  return {
+    ...asset,
+    _id: id,
+    id,
+    purchaseInvoice: asset.purchaseInvoices[0] ?? null,
+    warranty: { ...asset.warranty, document: asset.warranty.documents[0] ?? null },
+  };
 }

@@ -19,6 +19,7 @@ import { withComputed } from "../utils/computed";
 import { buildAssetWorkbook } from "../utils/excel";
 import { buildAssetInvoice } from "../utils/invoice";
 import {
+  MAX_DOCS,
   MAX_SERVICE_PHOTOS,
   SERVICE_PHOTO_FIELD,
   type UploadedFiles,
@@ -162,6 +163,47 @@ async function uploadIfPresent(
   const file = files?.[field]?.[0];
   if (!file) return null;
   return uploadBuffer(file, folder);
+}
+
+/**
+ * Rebuilds a multi-file field (purchase invoices, warranty documents).
+ *
+ * The form echoes back the publicIds it wants to keep, in display order; the file
+ * objects are looked up on the stored record rather than trusted from the
+ * request, so a client cannot point a record at an arbitrary URL. Newly uploaded
+ * files are appended after the kept ones.
+ */
+async function buildFileList(
+  body: Record<string, unknown>,
+  files: UploadedFiles | undefined,
+  opts: { field: string; keepField: string; folder: string; label: string },
+  existing: StoredFileDoc[] = []
+): Promise<{ list: StoredFileDoc[]; stale: StoredFileDoc[] }> {
+  const storedById = new Map(existing.filter((f) => f.publicId).map((f) => [f.publicId, f]));
+
+  const raw = body[opts.keepField];
+  const keepIds = parseJSON<string[]>(raw, []).filter((id) => typeof id === "string");
+
+  // An absent list means "leave this field alone" — a partial form (the service
+  // or verify modal) must not wipe the attachments.
+  const kept =
+    raw === undefined
+      ? existing
+      : keepIds.map((id) => storedById.get(id)).filter((f): f is StoredFileDoc => !!f);
+
+  const uploaded = await Promise.all(
+    (files?.[opts.field] ?? []).map((f) => uploadBuffer(f, opts.folder))
+  );
+
+  const list = [...kept, ...uploaded];
+  if (list.length > MAX_DOCS) {
+    throw new ApiError(400, `At most ${MAX_DOCS} ${opts.label} files`);
+  }
+
+  const keptIds = new Set(kept.map((f) => f.publicId));
+  const stale = existing.filter((f) => f.publicId && !keptIds.has(f.publicId));
+
+  return { list, stale };
 }
 
 /**
@@ -336,10 +378,10 @@ export async function createAsset(req: Request, res: Response): Promise<void> {
     );
   }
 
-  const [photo, purchaseInvoice, warrantyDocument, verificationPhoto] = await Promise.all([
+  const [photo, invoices, warrantyDocs, verificationPhoto] = await Promise.all([
     uploadIfPresent(files, "photo", "photos"),
-    uploadIfPresent(files, "purchaseInvoice", "invoices"),
-    uploadIfPresent(files, "warrantyDocument", "warranties"),
+    buildFileList(body, files, { field: "purchaseInvoice", keepField: "purchaseInvoiceIds", folder: "invoices", label: "invoice" }),
+    buildFileList(body, files, { field: "warrantyDocument", keepField: "warrantyDocumentIds", folder: "warranties", label: "warranty" }),
     uploadIfPresent(files, "verificationPhoto", "verifications"),
   ]);
 
@@ -366,17 +408,17 @@ export async function createAsset(req: Request, res: Response): Promise<void> {
   const asset = normalizeAsset({
     ...payload,
     photo,
-    purchaseInvoice,
+    purchaseInvoices: invoices.list,
     transferHistory,
     serviceRecords,
-    warranty: { ...payload.warranty, document: warrantyDocument },
+    warranty: { ...payload.warranty, documents: warrantyDocs.list },
     physicalVerification: { ...payload.physicalVerification, photo: verificationPhoto },
     createdAt: now,
     updatedAt: now,
   });
 
   await repo.create(asset);
-  res.status(201).json({ success: true, message: "Asset created", data: toApi(asset) });
+  res.status(201).json({ success: true, message: "Asset created", data: withComputed(toApi(asset)) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -410,32 +452,32 @@ export async function updateAsset(req: Request, res: Response): Promise<void> {
     prevDepartment !== payload.department ||
     prevLocation !== payload.location;
 
-  const [photo, purchaseInvoice, warrantyDocument, verificationPhoto] = await Promise.all([
+  const [photo, invoices, warrantyDocs, verificationPhoto] = await Promise.all([
     uploadIfPresent(files, "photo", "photos"),
-    uploadIfPresent(files, "purchaseInvoice", "invoices"),
-    uploadIfPresent(files, "warrantyDocument", "warranties"),
+    buildFileList(
+      body,
+      files,
+      { field: "purchaseInvoice", keepField: "purchaseInvoiceIds", folder: "invoices", label: "invoice" },
+      existing.purchaseInvoices
+    ),
+    buildFileList(
+      body,
+      files,
+      { field: "warrantyDocument", keepField: "warrantyDocumentIds", folder: "warranties", label: "warranty" },
+      existing.warranty.documents
+    ),
     uploadIfPresent(files, "verificationPhoto", "verifications"),
   ]);
 
   // Cloudinary files replaced or cleared here, deleted only after the write.
-  const stale: AnyFile[] = [];
+  const stale: AnyFile[] = [...invoices.stale, ...warrantyDocs.stale];
 
   let nextPhoto = existing.photo;
-  let nextInvoice = existing.purchaseInvoice;
-  let nextWarrantyDoc = existing.warranty.document;
   let nextVerificationPhoto = existing.physicalVerification.photo;
 
   if (isTrue(body.removePhoto)) {
     stale.push(nextPhoto);
     nextPhoto = null;
-  }
-  if (isTrue(body.removePurchaseInvoice)) {
-    stale.push(nextInvoice);
-    nextInvoice = null;
-  }
-  if (isTrue(body.removeWarrantyDocument)) {
-    stale.push(nextWarrantyDoc);
-    nextWarrantyDoc = null;
   }
   if (isTrue(body.removeVerificationPhoto)) {
     stale.push(nextVerificationPhoto);
@@ -445,14 +487,6 @@ export async function updateAsset(req: Request, res: Response): Promise<void> {
   if (photo) {
     stale.push(nextPhoto);
     nextPhoto = photo;
-  }
-  if (purchaseInvoice) {
-    stale.push(nextInvoice);
-    nextInvoice = purchaseInvoice;
-  }
-  if (warrantyDocument) {
-    stale.push(nextWarrantyDoc);
-    nextWarrantyDoc = warrantyDocument;
   }
   if (verificationPhoto) {
     stale.push(nextVerificationPhoto);
@@ -488,10 +522,10 @@ export async function updateAsset(req: Request, res: Response): Promise<void> {
   const asset = normalizeAsset({
     ...payload,
     photo: nextPhoto,
-    purchaseInvoice: nextInvoice,
+    purchaseInvoices: invoices.list,
     serviceRecords,
     transferHistory,
-    warranty: { ...payload.warranty, document: nextWarrantyDoc },
+    warranty: { ...payload.warranty, documents: warrantyDocs.list },
     physicalVerification: {
       ...payload.physicalVerification,
       photo: nextVerificationPhoto,
@@ -510,7 +544,7 @@ export async function updateAsset(req: Request, res: Response): Promise<void> {
     stale.filter(Boolean).map((f) => destroyFile(f!.publicId, f!.resourceType))
   );
 
-  res.json({ success: true, message: "Asset updated", data: toApi(asset) });
+  res.json({ success: true, message: "Asset updated", data: withComputed(toApi(asset)) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -521,8 +555,8 @@ export async function deleteAsset(req: Request, res: Response): Promise<void> {
 
   const files: AnyFile[] = [
     asset.photo,
-    asset.purchaseInvoice,
-    asset.warranty.document,
+    ...asset.purchaseInvoices,
+    ...asset.warranty.documents,
     asset.physicalVerification.photo,
     ...asset.serviceRecords.map((r) => r.photo),
   ];
@@ -570,7 +604,7 @@ export async function addServiceRecord(req: Request, res: Response): Promise<voi
   });
 
   await repo.replace(asset);
-  res.status(201).json({ success: true, message: "Service entry added", data: toApi(asset) });
+  res.status(201).json({ success: true, message: "Service entry added", data: withComputed(toApi(asset)) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -611,7 +645,7 @@ export async function addTransfer(req: Request, res: Response): Promise<void> {
   });
 
   await repo.replace(asset);
-  res.status(201).json({ success: true, message: "Transfer recorded", data: toApi(asset) });
+  res.status(201).json({ success: true, message: "Transfer recorded", data: withComputed(toApi(asset)) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -640,7 +674,7 @@ export async function verifyAsset(req: Request, res: Response): Promise<void> {
   await repo.replace(asset);
   if (stale) await destroyFile(stale.publicId, stale.resourceType);
 
-  res.json({ success: true, message: "Verification recorded", data: toApi(asset) });
+  res.json({ success: true, message: "Verification recorded", data: withComputed(toApi(asset)) });
 }
 
 /* ------------------------------------------------------------------ */
