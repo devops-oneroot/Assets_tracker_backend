@@ -22,6 +22,9 @@ interface InvoiceAsset {
   invoiceNumber?: string;
   vendor?: string;
   purchaseCost?: number;
+  gstPercent?: number;
+  gstAmount?: number;
+  totalCost?: number;
   depreciation?: {
     method?: string;
     ratePercent?: number;
@@ -406,6 +409,8 @@ export async function buildAssetInvoice(asset: InvoiceAsset): Promise<Buffer> {
     ["Invoice Number", asset.invoiceNumber ?? DASH],
     ["Vendor", asset.vendor ?? DASH],
     ["Purchase Cost", rupees(asset.purchaseCost)],
+    [`GST (${asset.gstPercent ?? 0}%)`, rupees(asset.gstAmount)],
+    ["Total Cost", rupees(asset.totalCost ?? asset.purchaseCost)],
     ["Invoice Document", fileLabel(asset.purchaseInvoice)],
   ]);
 

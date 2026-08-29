@@ -118,6 +118,7 @@ function buildAssetPayload(body: Record<string, unknown>) {
     invoiceNumber: String(body.invoiceNumber ?? "").trim(),
     vendor: String(body.vendor ?? "").trim(),
     purchaseCost: toNumber(body.purchaseCost),
+    gstPercent: toNumber(body.gstPercent),
     depreciation: {
       method: String(depreciation.method ?? "SLM"),
       ratePercent: toNumber(depreciation.ratePercent),

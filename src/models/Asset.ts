@@ -64,12 +64,13 @@ export interface AssetRaw {
   purchaseDate: Date | null;
   /** 💳 When the invoice was actually paid */
   paymentDate: Date | null;
-  /** 🧾 Purchase invoice */
   /** 🧾 Purchase invoices — first is the one shown wherever a single file fits */
   purchaseInvoices: StoredFileDoc[];
   invoiceNumber: string;
   vendor: string;
   purchaseCost: number;
+  /** 🧾 GST rate. The amount and total are derived on read, never stored. */
+  gstPercent: number;
 
   /** 📉 Depreciation */
   depreciation: {
@@ -198,6 +199,7 @@ export function normalizeAsset(raw: Record<string, unknown>): AssetRaw {
     invoiceNumber: str(raw.invoiceNumber),
     vendor: str(raw.vendor),
     purchaseCost: num(raw.purchaseCost),
+    gstPercent: num(raw.gstPercent),
 
     depreciation: {
       method: str(dep.method) || "SLM",

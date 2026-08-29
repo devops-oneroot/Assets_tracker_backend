@@ -15,6 +15,9 @@ interface ExportRow {
   invoiceNumber?: string;
   vendor?: string;
   purchaseCost?: number;
+  gstPercent?: number;
+  gstAmount?: number;
+  totalCost?: number;
   depreciation?: {
     method?: string;
     ratePercent?: number;
@@ -65,6 +68,14 @@ const COLUMNS: ColumnSpec[] = [
   { header: "Invoice No", width: 16, value: (r) => r.invoiceNumber ?? "" },
   { header: "Vendor", width: 20, value: (r) => r.vendor ?? "" },
   { header: "Purchase Cost", width: 15, value: (r) => r.purchaseCost ?? 0, format: MONEY_FMT },
+  { header: "GST %", width: 8, value: (r) => r.gstPercent ?? 0 },
+  { header: "GST Amount", width: 14, value: (r) => r.gstAmount ?? 0, format: MONEY_FMT },
+  {
+    header: "Total Cost",
+    width: 15,
+    value: (r) => r.totalCost ?? r.purchaseCost ?? 0,
+    format: MONEY_FMT,
+  },
 
   { header: "Dep. Method", width: 12, value: (r) => r.depreciation?.method ?? "" },
   { header: "Rate %", width: 9, value: (r) => r.depreciation?.ratePercent ?? 0 },
