@@ -3,7 +3,9 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { env } from "./config/env";
 import * as repo from "./repositories/assetRepository";
+import * as poRepo from "./repositories/purchaseOrderRepository";
 import assetRoutes from "./routes/assetRoutes";
+import purchaseOrderRoutes from "./routes/purchaseOrderRoutes";
 import authRoutes from "./routes/authRoutes";
 import { requireAuth } from "./middleware/auth";
 import { errorHandler, notFound } from "./middleware/errorHandler";
@@ -26,21 +28,33 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.get("/api/health", async (_req, res) => {
-  let database = "unknown";
-  try {
-    await repo.ping();
-    database = "connected";
-  } catch (err) {
-    database = `unavailable: ${(err as Error).name}`;
-  }
+  // The two tables are probed separately: purchase orders can be missing while
+  // the asset register is perfectly healthy, and the difference is the first
+  // thing worth knowing.
+  const probe = async (ping: () => Promise<boolean>): Promise<string> => {
+    try {
+      await ping();
+      return "connected";
+    } catch (err) {
+      return `unavailable: ${(err as Error).name}`;
+    }
+  };
+
+  const [database, poDatabase] = await Promise.all([
+    probe(repo.ping),
+    probe(poRepo.ping),
+  ]);
+
   res.json({
     success: true,
     service: "accounts-dashboard-api",
     env: env.nodeEnv,
     store: "dynamodb",
     table: env.aws.table,
+    poTable: env.aws.poTable,
     region: env.aws.region,
     database,
+    poDatabase,
   });
 });
 
@@ -49,6 +63,7 @@ app.use("/api/auth", authRoutes);
 // Everything below the login wall. Without this the login screen would only be
 // a curtain — the API would still answer anyone who called it directly.
 app.use("/api/assets", requireAuth, assetRoutes);
+app.use("/api/purchase-orders", requireAuth, purchaseOrderRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -66,7 +81,7 @@ async function start(): Promise<void> {
 
   try {
     await repo.ping();
-    console.log("[ddb] table reachable");
+    console.log(`[ddb] table "${env.aws.table}" reachable`);
   } catch (err) {
     const e = err as { name?: string; message?: string };
     console.error(`[ddb] table unreachable: ${e.name} - ${e.message}`);
@@ -78,6 +93,19 @@ async function start(): Promise<void> {
     }
     if (e.name === "AccessDeniedException") {
       console.error("[ddb] hint: the IAM user needs dynamodb Get/Put/Delete/Scan on this table");
+    }
+  }
+
+  try {
+    await poRepo.ping();
+    console.log(`[ddb] table "${env.aws.poTable}" reachable`);
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    console.error(`[ddb] purchase order table unreachable: ${e.name} - ${e.message}`);
+    if (e.name === "ResourceNotFoundException") {
+      console.error(
+        `[ddb] hint: create a table named "${env.aws.poTable}" with partition key "entity" (String) and sort key "poNumber" (String), or set DYNAMODB_PO_TABLE`
+      );
     }
   }
 }

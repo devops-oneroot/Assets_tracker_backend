@@ -36,12 +36,17 @@ export function errorHandler(
 
   const e = err as { name?: string; code?: number; message?: string; errors?: Record<string, { message: string }> };
 
-  // Atlas drops the pool from time to time (TLS resets, shared-tier throttling).
-  // Those are transient and retryable, so say so instead of leaking a driver stack.
-  // A conditional write lost the race — the FA code was taken between the
-  // pre-check and the put.
-  if (e?.name === "ConditionalCheckFailedException" || e?.name === "DuplicateCodeError") {
-    res.status(409).json({ success: false, message: e.message || "That FA code is already in use" });
+  // A conditional write lost the race — the FA code or PO number was taken
+  // between the pre-check and the put.
+  if (
+    e?.name === "ConditionalCheckFailedException" ||
+    e?.name === "DuplicateCodeError" ||
+    e?.name === "DuplicatePoNumberError"
+  ) {
+    res.status(409).json({
+      success: false,
+      message: e.message || "That code is already in use",
+    });
     return;
   }
 
@@ -61,7 +66,7 @@ export function errorHandler(
     console.error("[ddb] unavailable:", e.name, "-", e.message);
     const message =
       e.name === "ResourceNotFoundException"
-        ? "The DynamoDB table was not found — check DYNAMODB_TABLE and AWS_REGION."
+        ? "A DynamoDB table was not found — check DYNAMODB_TABLE / DYNAMODB_PO_TABLE and AWS_REGION."
         : e.name === "AccessDeniedException"
           ? "AWS credentials lack permission for this table."
           : e.name === "UnrecognizedClientException" || e.name === "InvalidSignatureException"

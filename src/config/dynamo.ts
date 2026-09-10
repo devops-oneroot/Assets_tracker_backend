@@ -23,3 +23,4 @@ export const ddb = DynamoDBDocumentClient.from(client, {
 });
 
 export const TABLE = env.aws.table;
+export const PO_TABLE = env.aws.poTable;
