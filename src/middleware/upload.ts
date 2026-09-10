@@ -47,4 +47,7 @@ export const assetUpload = upload.fields([
   })),
 ]);
 
+/** The file inputs a purchase order can submit: quotes, proposals, signed copies. */
+export const poUpload = upload.fields([{ name: "attachment", maxCount: MAX_DOCS }]);
+
 export type UploadedFiles = Record<string, Express.Multer.File[] | undefined>;

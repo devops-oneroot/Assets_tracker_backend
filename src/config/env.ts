@@ -37,6 +37,11 @@ export const env = {
     accessKeyId: required("AWS_ACCESS_KEY_ID"),
     secretAccessKey: required("AWS_SECRET_ACCESS_KEY"),
     table: required("DYNAMODB_TABLE"),
+    // Purchase orders live in their own table so they never turn up in an asset
+    // scan, export or stat. Defaults to a sibling of the asset table.
+    poTable:
+      process.env.DYNAMODB_PO_TABLE?.trim() ||
+      `${required("DYNAMODB_TABLE")}-purchase-orders`,
   },
   clientOrigins,
   crossSite,
