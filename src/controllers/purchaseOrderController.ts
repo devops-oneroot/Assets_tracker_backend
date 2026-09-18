@@ -18,6 +18,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { destroyFile, uploadBuffer } from "../utils/cloudinaryUpload";
 import { buildPurchaseOrderWorkbook } from "../utils/poExcel";
 import { buildPurchaseOrderPdf } from "../utils/poPdf";
+import { sendPurchaseOrderEmail } from "../utils/mailer";
 import { financialYear, nextPoNumber } from "../utils/poNumber";
 import { MAX_DOCS, type UploadedFiles } from "../middleware/upload";
 
@@ -160,8 +161,13 @@ function buildPayload(body: Record<string, unknown>) {
       email: trim(supplierExtra.email).toLowerCase(),
     },
     deliverTo: deliverTo.name ? deliverTo : buyer.name ? buyer : profile,
+    vendorCode: trim(body.vendorCode),
+    currency: trim(body.currency).toUpperCase() || "INR",
     supplierRef: trim(body.supplierRef),
     otherReference: trim(body.otherReference),
+    paymentTerms: trim(body.paymentTerms),
+    project: trim(body.project),
+    purchasingGroup: trim(body.purchasingGroup),
     items: buildItems(body),
     discount: toNumber(body.discount),
     gstPercent: toNumber(body.gstPercent),
@@ -182,17 +188,35 @@ function buildPayload(body: Record<string, unknown>) {
   };
 }
 
-function assertRequired(payload: {
-  entity: string;
-  poNumber: string;
-  supplier: { name: string };
-  items: PoItemDoc[];
-}): void {
+/**
+ * The contact person, phone and per-line HSN/SAC checks are `strict`-only, so
+ * only *creating* a new order enforces them — an older order saved before this
+ * rule existed can still be edited and re-saved without being forced to
+ * backfill data that didn't used to be asked for.
+ */
+function assertRequired(
+  payload: {
+    entity: string;
+    poNumber: string;
+    supplier: { name: string; contactPerson: string; phone: string };
+    items: PoItemDoc[];
+  },
+  opts: { strict?: boolean } = {}
+): void {
   if (!payload.poNumber) throw new ApiError(400, "PO number is required");
   if (!payload.entity) throw new ApiError(400, "Entity is required (ENP or GCC)");
   if (!payload.supplier.name) throw new ApiError(400, "Supplier name is required");
+  if (opts.strict && !payload.supplier.contactPerson) {
+    throw new ApiError(400, "Supplier contact person is required");
+  }
+  if (opts.strict && !payload.supplier.phone) {
+    throw new ApiError(400, "Supplier phone number is required");
+  }
   if (!payload.items.some((i) => i.kind !== "heading")) {
     throw new ApiError(400, "Add at least one priced line to the order");
+  }
+  if (opts.strict && payload.items.some((i) => i.kind !== "heading" && !i.hsnCode)) {
+    throw new ApiError(400, "Add an HSN/SAC code for every item");
   }
 }
 
@@ -332,7 +356,7 @@ export async function createPurchaseOrder(req: Request, res: Response): Promise<
   const body = (req.body ?? {}) as Record<string, unknown>;
   const payload = buildPayload(body);
 
-  assertRequired(payload);
+  assertRequired(payload, { strict: true });
 
   // Cheap pre-check so an obvious duplicate does not pay for uploads first; the
   // conditional write in the repository is what actually guarantees uniqueness.
@@ -452,6 +476,26 @@ export async function getPurchaseOrderPdf(req: Request, res: Response): Promise<
 }
 
 /* ------------------------------------------------------------------ */
+/* POST /api/purchase-orders/:id/email                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Emails the order's PDF to its supplier, from the buying company's own
+ * mailbox (onerootoffice@oneroot.farm for ENP, accounts@goldcoinsresort.in for
+ * GCC). A deliberate, on-demand action — nothing sends a PO to a vendor on its
+ * own.
+ */
+export async function emailPurchaseOrder(req: Request, res: Response): Promise<void> {
+  const po = await loadOr404(req);
+  const api = toApi(po);
+
+  const pdf = await buildPurchaseOrderPdf(api);
+  const { to, from } = await sendPurchaseOrderEmail(api, pdf);
+
+  res.json({ success: true, message: `PO ${po.poNumber} emailed to ${to}`, data: { to, from } });
+}
+
+/* ------------------------------------------------------------------ */
 /* GET /api/purchase-orders/export                                     */
 /* ------------------------------------------------------------------ */
 export async function exportPurchaseOrders(req: Request, res: Response): Promise<void> {
@@ -532,6 +576,8 @@ export async function getPoFilterOptions(_req: Request, res: Response): Promise<
       suppliers: distinct((p) => p.supplier.name),
       departments: distinct((p) => p.department),
       requesters: distinct((p) => p.requestedBy),
+      projects: distinct((p) => p.project),
+      purchasingGroups: distinct((p) => p.purchasingGroup),
       units: distinct((p) => p.items.map((i) => i.unit).find(Boolean) ?? ""),
       /** Every buyer block already used, so a new PO can reuse one verbatim. */
       buyers: Object.fromEntries(

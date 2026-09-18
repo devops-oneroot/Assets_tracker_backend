@@ -81,9 +81,19 @@ export interface PurchaseOrderRaw {
   /** Where the goods go. Usually the buyer's own address. */
   deliverTo: PartyDoc;
 
+  /** The supplier's own code in the buyer's vendor master, if one exists. */
+  vendorCode: string;
+  /** ISO currency the order is priced in — "INR" unless stated otherwise. */
+  currency: string;
   /** The supplier's own quotation reference, and anything else being cited. */
   supplierRef: string;
   otherReference: string;
+  /** How the vendor gets paid, printed as its own header field, e.g. "50% advance, 50% on delivery". */
+  paymentTerms: string;
+  /** The job or contract this order is raised against, e.g. "Construction of Warehouse". */
+  project: string;
+  /** The buying team that raised the order, e.g. "ENP / PROJECTS". */
+  purchasingGroup: string;
 
   items: PoItemDoc[];
 
@@ -178,8 +188,13 @@ export function normalizePurchaseOrder(raw: Record<string, unknown>): PurchaseOr
     },
     deliverTo: asParty(raw.deliverTo),
 
+    vendorCode: str(raw.vendorCode),
+    currency: str(raw.currency).toUpperCase() || "INR",
     supplierRef: str(raw.supplierRef),
     otherReference: str(raw.otherReference),
+    paymentTerms: str(raw.paymentTerms),
+    project: str(raw.project),
+    purchasingGroup: str(raw.purchasingGroup),
 
     items: asArray(raw.items).map((i) => ({
       _id: str(i._id) || newId(),
@@ -315,8 +330,11 @@ export function buildSearchText(po: PurchaseOrderRaw): string {
     po.supplier.name,
     po.supplier.gstNumber,
     po.supplier.contactPerson,
+    po.vendorCode,
     po.supplierRef,
     po.otherReference,
+    po.project,
+    po.purchasingGroup,
     po.department,
     po.requestedBy,
     po.approvedBy,

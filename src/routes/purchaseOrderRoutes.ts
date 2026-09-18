@@ -9,6 +9,7 @@ import {
   setPurchaseOrderStatus,
   deletePurchaseOrder,
   getPurchaseOrderPdf,
+  emailPurchaseOrder,
   exportPurchaseOrders,
   getPoFilterOptions,
   getPoStats,
@@ -32,5 +33,6 @@ router.patch("/:id/status", asyncHandler(setPurchaseOrderStatus));
 router.delete("/:id", asyncHandler(deletePurchaseOrder));
 
 router.get("/:id/pdf", asyncHandler(getPurchaseOrderPdf));
+router.post("/:id/email", asyncHandler(emailPurchaseOrder));
 
 export default router;

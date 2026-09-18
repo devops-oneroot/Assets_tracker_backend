@@ -14,13 +14,13 @@ export interface PartyDoc {
 
 export const BUYER_PROFILES: Record<string, PartyDoc> = {
   GCC: {
-    name: "GOLD COINS CLUB",
+    name: "Gold Coins Club & Resort",
     address:
       "SY NO. 45/1, ANDAPURA VILLAGE, ATTIBELE HOBLI, ANEKAL TALUK, ELECTRONIC CITY POST, Bengaluru (Bangalore) Urban, Karnataka, 560100",
     gstNumber: "29AAAAG1219N1ZM",
   },
   ENP: {
-    name: "ENP",
+    name: "ENP Farms Pvt Ltd",
     address: "",
     gstNumber: "",
   },
