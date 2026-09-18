@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import PDFDocument from "pdfkit";
 import { rupeesInWords } from "./amountInWords";
 import type { PurchaseOrderApi } from "../models/PurchaseOrder";
@@ -28,6 +30,49 @@ const COLS = {
   unit: 0.09,
   amount: 0.17,
 } as const;
+
+/** Printed size of the company logo in the letterhead, in points. */
+const LOGO_SIZE = 54;
+
+/**
+ * Where the company logos live: backend/assets/logos/<ENTITY>.png.
+ *
+ * Resolved relative to this file rather than the working directory, so it
+ * finds them whether running from src/ under tsx or from dist/ after a build.
+ * The cwd form is a fallback for hosts that run the server from elsewhere.
+ */
+function logoPath(entity: string): string | null {
+  const file = `${entity.toUpperCase()}.png`;
+  const candidates = [
+    path.resolve(__dirname, "..", "..", "assets", "logos", file),
+    path.resolve(process.cwd(), "assets", "logos", file),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+const logoCache = new Map<string, Buffer | null>();
+
+/**
+ * The logo bytes for a company, read once and kept.
+ *
+ * A missing or unreadable file gives null and the document prints without a
+ * logo — a purchase order must never fail to generate over its letterhead.
+ */
+function loadLogo(entity: string): Buffer | null {
+  if (!logoCache.has(entity)) {
+    const found = logoPath(entity);
+    let bytes: Buffer | null = null;
+    if (found) {
+      try {
+        bytes = readFileSync(found);
+      } catch {
+        bytes = null;
+      }
+    }
+    logoCache.set(entity, bytes);
+  }
+  return logoCache.get(entity) ?? null;
+}
 
 function ddmmyyyy(value?: Date | string | null): string {
   if (!value) return DASH;
@@ -107,14 +152,31 @@ export async function buildPurchaseOrderPdf(po: PurchaseOrderApi): Promise<Buffe
     return doc.heightOfString(text, { width: w - (opts.pad ?? 4) * 2 });
   };
 
-  /* ---------------- Title ---------------- */
+  /* ---------------- Letterhead ---------------- */
+  /*
+   * The buying company's logo sits top-left, the way a printed letterhead
+   * would carry it. The title stays centred on the page so the document reads
+   * the same whether or not a logo is on file for the company.
+   */
+
+  const logo = loadLogo(po.entity);
+  const bandH = logo ? LOGO_SIZE : 20;
+
+  if (logo) {
+    try {
+      doc.image(logo, left, y, { fit: [LOGO_SIZE, LOGO_SIZE], align: "center", valign: "center" });
+    } catch {
+      // A corrupt image is treated the same as no image.
+    }
+  }
 
   doc
     .font("Helvetica-Bold")
     .fontSize(13)
     .fillColor(INK)
-    .text("PURCHASE ORDER", left, y, { width, align: "center" });
-  y += 20;
+    .text("PURCHASE ORDER", left, y + (bandH - 13) / 2, { width, align: "center" });
+
+  y += bandH + 6;
 
   /* ---------------- Header panel ---------------- */
   /*
