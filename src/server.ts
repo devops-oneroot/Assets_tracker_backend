@@ -4,8 +4,10 @@ import cookieParser from "cookie-parser";
 import { env } from "./config/env";
 import * as repo from "./repositories/assetRepository";
 import * as poRepo from "./repositories/purchaseOrderRepository";
+import * as vendorRepo from "./repositories/vendorRepository";
 import assetRoutes from "./routes/assetRoutes";
 import purchaseOrderRoutes from "./routes/purchaseOrderRoutes";
+import vendorRoutes from "./routes/vendorRoutes";
 import authRoutes from "./routes/authRoutes";
 import { requireAuth } from "./middleware/auth";
 import { errorHandler, notFound } from "./middleware/errorHandler";
@@ -40,9 +42,10 @@ app.get("/api/health", async (_req, res) => {
     }
   };
 
-  const [database, poDatabase] = await Promise.all([
+  const [database, poDatabase, vendorDatabase] = await Promise.all([
     probe(repo.ping),
     probe(poRepo.ping),
+    probe(vendorRepo.ping),
   ]);
 
   res.json({
@@ -52,9 +55,11 @@ app.get("/api/health", async (_req, res) => {
     store: "dynamodb",
     table: env.aws.table,
     poTable: env.aws.poTable,
+    vendorTable: env.aws.vendorTable,
     region: env.aws.region,
     database,
     poDatabase,
+    vendorDatabase,
   });
 });
 
@@ -64,6 +69,7 @@ app.use("/api/auth", authRoutes);
 // a curtain — the API would still answer anyone who called it directly.
 app.use("/api/assets", requireAuth, assetRoutes);
 app.use("/api/purchase-orders", requireAuth, purchaseOrderRoutes);
+app.use("/api/vendors", requireAuth, vendorRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -105,6 +111,19 @@ async function start(): Promise<void> {
     if (e.name === "ResourceNotFoundException") {
       console.error(
         `[ddb] hint: create a table named "${env.aws.poTable}" with partition key "entity" (String) and sort key "poNumber" (String), or set DYNAMODB_PO_TABLE`
+      );
+    }
+  }
+
+  try {
+    await vendorRepo.ping();
+    console.log(`[ddb] table "${env.aws.vendorTable}" reachable`);
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    console.error(`[ddb] vendor table unreachable: ${e.name} - ${e.message}`);
+    if (e.name === "ResourceNotFoundException") {
+      console.error(
+        `[ddb] hint: create a table named "${env.aws.vendorTable}" with partition key "id" (String), or set DYNAMODB_VENDOR_TABLE`
       );
     }
   }

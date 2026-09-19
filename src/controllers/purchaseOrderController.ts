@@ -19,6 +19,7 @@ import { destroyFile, uploadBuffer } from "../utils/cloudinaryUpload";
 import { buildPurchaseOrderWorkbook } from "../utils/poExcel";
 import { buildPurchaseOrderPdf } from "../utils/poPdf";
 import { sendPurchaseOrderEmail } from "../utils/mailer";
+import { syncVendorFromSupplier } from "../utils/vendorSync";
 import { financialYear, nextPoNumber } from "../utils/poNumber";
 import { MAX_DOCS, type UploadedFiles } from "../middleware/upload";
 
@@ -52,6 +53,25 @@ function toDate(value: unknown): Date | null {
 }
 
 const trim = (value: unknown): string => String(value ?? "").trim();
+
+/**
+ * The "what do they supply" tags typed on the Supplier section - not part of
+ * the order itself, so they never land on `PurchaseOrderRaw`. They exist only
+ * to be handed to `syncVendorFromSupplier` after the order is saved.
+ */
+function supplierSupplyTags(body: Record<string, unknown>): string[] {
+  const raw = parseJSON<string[]>(body.supplierSuppliesTags, []);
+  return Array.from(new Set(raw.map((t) => trim(t)).filter(Boolean)));
+}
+
+/**
+ * The category typed for a brand-new supplier on the Supplier section - same
+ * deal as the tags above: not part of the order, only used to categorise a
+ * vendor `syncVendorFromSupplier` is about to create.
+ */
+function supplierCategory(body: Record<string, unknown>): string {
+  return trim(body.supplierCategory);
+}
 
 /**
  * The route param is the composite "entity~poNumber" id, percent-encoded in the
@@ -378,6 +398,11 @@ export async function createPurchaseOrder(req: Request, res: Response): Promise<
   });
 
   await repo.create(po);
+
+  // Best-effort: never lets a vendor-sync hiccup fail the PO that was just
+  // created.
+  await syncVendorFromSupplier(po.supplier, supplierSupplyTags(body), po.vendorCode, supplierCategory(body));
+
   res
     .status(201)
     .json({ success: true, message: "Purchase order created", data: toApi(po) });
@@ -426,6 +451,8 @@ export async function updatePurchaseOrder(req: Request, res: Response): Promise<
 
   // Files dropped from the order are deleted only after the write succeeds.
   await Promise.all(attachments.stale.map((f) => destroyFile(f.publicId, f.resourceType)));
+
+  await syncVendorFromSupplier(po.supplier, supplierSupplyTags(body), po.vendorCode, supplierCategory(body));
 
   res.json({ success: true, message: "Purchase order updated", data: toApi(po) });
 }

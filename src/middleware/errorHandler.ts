@@ -66,7 +66,7 @@ export function errorHandler(
     console.error("[ddb] unavailable:", e.name, "-", e.message);
     const message =
       e.name === "ResourceNotFoundException"
-        ? "A DynamoDB table was not found — check DYNAMODB_TABLE / DYNAMODB_PO_TABLE and AWS_REGION."
+        ? "A DynamoDB table was not found — check DYNAMODB_TABLE / DYNAMODB_PO_TABLE / DYNAMODB_VENDOR_TABLE and AWS_REGION."
         : e.name === "AccessDeniedException"
           ? "AWS credentials lack permission for this table."
           : e.name === "UnrecognizedClientException" || e.name === "InvalidSignatureException"

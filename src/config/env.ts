@@ -42,6 +42,12 @@ export const env = {
     poTable:
       process.env.DYNAMODB_PO_TABLE?.trim() ||
       `${required("DYNAMODB_TABLE")}-purchase-orders`,
+    // The vendor master, likewise its own table. Shared across both companies -
+    // a vendor is not owned by ENP or GCC, so this has no per-entity default the
+    // way the other two tables do.
+    vendorTable:
+      process.env.DYNAMODB_VENDOR_TABLE?.trim() ||
+      `${required("DYNAMODB_TABLE")}-vendors`,
   },
   clientOrigins,
   crossSite,
