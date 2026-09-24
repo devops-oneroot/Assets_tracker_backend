@@ -18,6 +18,9 @@ import { computeDepreciation } from "../utils/depreciation";
 import { withComputed } from "../utils/computed";
 import { buildAssetWorkbook } from "../utils/excel";
 import { buildAssetInvoice } from "../utils/invoice";
+import { extractAssetFromDocument } from "../utils/assetExtract";
+import { nextAssetCode } from "../utils/assetCode";
+import { EXTRACTABLE_TYPES } from "../utils/geminiDoc";
 import {
   MAX_DOCS,
   MAX_SERVICE_PHOTOS,
@@ -716,6 +719,54 @@ export async function getAssetInvoice(req: Request, res: Response): Promise<void
   res.setHeader("Content-Disposition", `attachment; filename="${safeCode}-invoice.pdf"`);
   res.setHeader("Content-Length", String(pdf.length));
   res.send(pdf);
+}
+
+/* ------------------------------------------------------------------ */
+/* GET /api/assets/meta/next-code                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Suggests the next FA code for one company.
+ *
+ * The read is scoped to that company's partition, so the two series stay
+ * genuinely independent: asking for GCC's next code never looks at, and never
+ * advances, ENP's.
+ *
+ * This only *suggests*. Nothing is reserved until the asset is saved, and the
+ * conditional write in the repository is what actually settles a race between
+ * two people filling the form at once.
+ */
+export async function getNextAssetCode(req: Request, res: Response): Promise<void> {
+  const query = req.query as Record<string, string | undefined>;
+  const entity = String(query.entity ?? "").trim().toUpperCase();
+
+  if (!(ENTITIES as readonly string[]).includes(entity)) {
+    throw new ApiError(400, "Pick the company first (ENP or GCC)");
+  }
+
+  const assets = await repo.getByEntity(entity);
+  res.json({ success: true, data: { assetCode: nextAssetCode(entity, assets), entity } });
+}
+
+/* ------------------------------------------------------------------ */
+/* POST /api/assets/meta/extract-pdf                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads an uploaded purchase invoice - a PDF or a photo of one - and returns
+ * fields to pre-fill the Create Asset form with. Nothing is saved here: this
+ * only reads a file and hands back suggestions; the asset is still created
+ * through the normal POST, same validation and all.
+ */
+export async function extractAssetDocument(req: Request, res: Response): Promise<void> {
+  const file = req.file as Express.Multer.File | undefined;
+  if (!file) throw new ApiError(400, "Attach a PDF or photo to import from");
+  if (!EXTRACTABLE_TYPES.has(file.mimetype)) {
+    throw new ApiError(400, "Only PDF or image files (JPG, PNG, WEBP, HEIC) are supported");
+  }
+
+  const data = await extractAssetFromDocument(file.buffer, file.mimetype);
+  res.json({ success: true, data });
 }
 
 /* ------------------------------------------------------------------ */

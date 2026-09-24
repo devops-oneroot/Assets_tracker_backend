@@ -20,6 +20,8 @@ import { buildPurchaseOrderWorkbook } from "../utils/poExcel";
 import { buildPurchaseOrderPdf } from "../utils/poPdf";
 import { sendPurchaseOrderEmail } from "../utils/mailer";
 import { syncVendorFromSupplier } from "../utils/vendorSync";
+import { extractPurchaseOrderFromPdf } from "../utils/pdfExtract";
+import { EXTRACTABLE_TYPES } from "../utils/geminiDoc";
 import { financialYear, nextPoNumber } from "../utils/poNumber";
 import { MAX_DOCS, type UploadedFiles } from "../middleware/upload";
 
@@ -581,6 +583,27 @@ export async function getNextPoNumber(req: Request, res: Response): Promise<void
   );
 
   res.json({ success: true, data: { ...next, entity } });
+}
+
+/* ------------------------------------------------------------------ */
+/* POST /api/purchase-orders/meta/extract-pdf                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads an uploaded vendor quotation/invoice/old-PO - a PDF or a photo/scan
+ * of one - and returns fields to pre-fill the New PO form with. Nothing is
+ * saved here - this only reads a file and hands back suggestions; the order
+ * is still created through the normal POST, same validation and all.
+ */
+export async function extractPurchaseOrderPdf(req: Request, res: Response): Promise<void> {
+  const file = req.file as Express.Multer.File | undefined;
+  if (!file) throw new ApiError(400, "Attach a PDF or photo to import from");
+  if (!EXTRACTABLE_TYPES.has(file.mimetype)) {
+    throw new ApiError(400, "Only PDF or image files (JPG, PNG, WEBP, HEIC) are supported");
+  }
+
+  const data = await extractPurchaseOrderFromPdf(file.buffer, file.mimetype);
+  res.json({ success: true, data });
 }
 
 /* ------------------------------------------------------------------ */

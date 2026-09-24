@@ -62,4 +62,11 @@ export const env = {
     apiSecret: required("CLOUD_API_SECRET"),
     folder: process.env.CLOUD_FOLDER ?? "accounts-dashboard/assets",
   },
+  // Optional: powers "Import from PDF" on the PO form. Left unset, that
+  // feature fails with a clear setup message rather than blocking startup -
+  // the rest of the app has nothing to do with it.
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY?.trim() ?? "",
+    model: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+  },
 };

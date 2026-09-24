@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { assetUpload, upload } from "../middleware/upload";
+import { assetUpload, pdfExtractUpload, upload } from "../middleware/upload";
 import { asyncHandler } from "../middleware/errorHandler";
 import {
   listAssets,
@@ -14,6 +14,8 @@ import {
   getAssetInvoice,
   getFilterOptions,
   getStats,
+  extractAssetDocument,
+  getNextAssetCode,
 } from "../controllers/assetController";
 
 const router = Router();
@@ -22,6 +24,8 @@ const router = Router();
 router.get("/export", asyncHandler(exportAssets));
 router.get("/meta/options", asyncHandler(getFilterOptions));
 router.get("/meta/stats", asyncHandler(getStats));
+router.get("/meta/next-code", asyncHandler(getNextAssetCode));
+router.post("/meta/extract-pdf", pdfExtractUpload, asyncHandler(extractAssetDocument));
 
 router.get("/", asyncHandler(listAssets));
 router.post("/", assetUpload, asyncHandler(createAsset));

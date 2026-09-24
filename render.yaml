@@ -48,3 +48,9 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+
+      # Optional - powers "Import from PDF" on the New PO form. Leave unset
+      # and that one feature fails with a clear setup message; nothing else
+      # depends on it.
+      - key: GEMINI_API_KEY
+        sync: false

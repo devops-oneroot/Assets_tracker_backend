@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { poUpload } from "../middleware/upload";
+import { poUpload, pdfExtractUpload } from "../middleware/upload";
 import { asyncHandler } from "../middleware/errorHandler";
 import {
   listPurchaseOrders,
@@ -14,6 +14,7 @@ import {
   getPoFilterOptions,
   getPoStats,
   getNextPoNumber,
+  extractPurchaseOrderPdf,
 } from "../controllers/purchaseOrderController";
 
 const router = Router();
@@ -23,6 +24,7 @@ router.get("/export", asyncHandler(exportPurchaseOrders));
 router.get("/meta/options", asyncHandler(getPoFilterOptions));
 router.get("/meta/next-number", asyncHandler(getNextPoNumber));
 router.get("/meta/stats", asyncHandler(getPoStats));
+router.post("/meta/extract-pdf", pdfExtractUpload, asyncHandler(extractPurchaseOrderPdf));
 
 router.get("/", asyncHandler(listPurchaseOrders));
 router.post("/", poUpload, asyncHandler(createPurchaseOrder));

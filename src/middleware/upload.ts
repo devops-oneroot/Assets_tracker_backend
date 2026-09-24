@@ -50,4 +50,7 @@ export const assetUpload = upload.fields([
 /** The file inputs a purchase order can submit: quotes, proposals, signed copies. */
 export const poUpload = upload.fields([{ name: "attachment", maxCount: MAX_DOCS }]);
 
+/** The single PDF "Import from PDF" reads a vendor quotation or an old PO from. */
+export const pdfExtractUpload = upload.single("pdf");
+
 export type UploadedFiles = Record<string, Express.Multer.File[] | undefined>;
