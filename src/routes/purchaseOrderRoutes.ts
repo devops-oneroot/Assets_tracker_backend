@@ -15,6 +15,10 @@ import {
   getPoStats,
   getNextPoNumber,
   extractPurchaseOrderPdf,
+  addPaymentAdvice,
+  updatePaymentAdvice,
+  deletePaymentAdvice,
+  getPaymentAdvicePdf,
 } from "../controllers/purchaseOrderController";
 
 const router = Router();
@@ -36,5 +40,10 @@ router.delete("/:id", asyncHandler(deletePurchaseOrder));
 
 router.get("/:id/pdf", asyncHandler(getPurchaseOrderPdf));
 router.post("/:id/email", asyncHandler(emailPurchaseOrder));
+
+router.post("/:id/payment-advices", asyncHandler(addPaymentAdvice));
+router.put("/:id/payment-advices/:adviceId", asyncHandler(updatePaymentAdvice));
+router.delete("/:id/payment-advices/:adviceId", asyncHandler(deletePaymentAdvice));
+router.get("/:id/payment-advices/:adviceId/pdf", asyncHandler(getPaymentAdvicePdf));
 
 export default router;

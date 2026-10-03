@@ -3,10 +3,13 @@ import {
   GST_MODES,
   PO_ITEM_KINDS,
   PO_STATUSES,
+  computeTotals,
   newId,
+  normalizePaymentAdvice,
   normalizePurchaseOrder,
   parseId,
   toApi,
+  type PaymentAdviceDoc,
   type PoItemDoc,
   type PoItemKind,
   type PurchaseOrderRaw,
@@ -18,6 +21,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { destroyFile, uploadBuffer } from "../utils/cloudinaryUpload";
 import { buildPurchaseOrderWorkbook } from "../utils/poExcel";
 import { buildPurchaseOrderPdf } from "../utils/poPdf";
+import { buildPaymentAdvicePdf } from "../utils/paymentAdvicePdf";
 import { sendPurchaseOrderEmail } from "../utils/mailer";
 import { syncVendorFromSupplier } from "../utils/vendorSync";
 import { extractPurchaseOrderFromPdf } from "../utils/pdfExtract";
@@ -441,6 +445,10 @@ export async function updatePurchaseOrder(req: Request, res: Response): Promise<
   const po = normalizePurchaseOrder({
     ...payload,
     attachments: attachments.list,
+    // The edit form knows nothing about payment advices, so they have to be
+    // carried over explicitly - rebuilding from the payload alone would drop
+    // every advice already raised against this order.
+    paymentAdvices: existing.paymentAdvices,
     createdAt: existing.createdAt,
     updatedAt: new Date(),
   });
@@ -475,6 +483,128 @@ export async function setPurchaseOrderStatus(req: Request, res: Response): Promi
   await repo.replace(po);
 
   res.json({ success: true, message: `Marked ${status}`, data: toApi(po) });
+}
+
+/* ------------------------------------------------------------------ */
+/* Payment advices                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Builds one advice from the request, seeded from the order.
+ *
+ * Anything the form leaves blank falls back to what the order already knows -
+ * supplier block, project, payment terms, order value - so raising an advice
+ * needs only the parts a purchase order has no way of knowing: the invoice,
+ * the deductions, and who certified it.
+ */
+function buildAdvice(
+  body: Record<string, unknown>,
+  po: PurchaseOrderRaw,
+  existing?: PaymentAdviceDoc
+): PaymentAdviceDoc {
+  const pick = (key: string, fallback: string): string =>
+    body[key] === undefined ? fallback : trim(body[key]);
+
+  const grandTotal = computeTotals(po).grandTotal;
+
+  return normalizePaymentAdvice({
+    ...body,
+    _id: existing?._id ?? newId(),
+
+    supplierName: pick("supplierName", existing?.supplierName ?? po.supplier.name),
+    supplierAddress: pick("supplierAddress", existing?.supplierAddress ?? po.supplier.address),
+    supplierGstNumber: pick(
+      "supplierGstNumber",
+      existing?.supplierGstNumber ?? po.supplier.gstNumber
+    ),
+    projectName: pick("projectName", existing?.projectName ?? po.project),
+    projectAddress: pick("projectAddress", existing?.projectAddress ?? po.deliverTo.address),
+    projectGstNumber: pick(
+      "projectGstNumber",
+      existing?.projectGstNumber ?? (po.deliverTo.gstNumber || po.buyer.gstNumber)
+    ),
+    paymentTerms: pick("paymentTerms", existing?.paymentTerms ?? po.paymentTerms),
+
+    originalPoValue:
+      body.originalPoValue === undefined
+        ? (existing?.originalPoValue ?? grandTotal)
+        : toNumber(body.originalPoValue),
+    finalPoValue:
+      body.finalPoValue === undefined
+        ? (existing?.finalPoValue ?? grandTotal)
+        : toNumber(body.finalPoValue),
+
+    createdAt: existing?.createdAt ?? new Date(),
+    updatedAt: new Date(),
+  });
+}
+
+function adviceOr404(po: PurchaseOrderRaw, adviceId: string): PaymentAdviceDoc {
+  const found = po.paymentAdvices.find((a) => a._id === adviceId);
+  if (!found) throw new ApiError(404, "Payment advice not found");
+  return found;
+}
+
+/* POST /api/purchase-orders/:id/payment-advices */
+export async function addPaymentAdvice(req: Request, res: Response): Promise<void> {
+  const existing = await loadOr404(req);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const advice = buildAdvice(body, existing);
+  const po = normalizePurchaseOrder({
+    ...existing,
+    paymentAdvices: [...existing.paymentAdvices, advice],
+    updatedAt: new Date(),
+  });
+
+  await repo.replace(po);
+  res.status(201).json({ success: true, message: "Payment advice added", data: toApi(po) });
+}
+
+/* PUT /api/purchase-orders/:id/payment-advices/:adviceId */
+export async function updatePaymentAdvice(req: Request, res: Response): Promise<void> {
+  const existing = await loadOr404(req);
+  const adviceId = String(req.params.adviceId ?? "");
+  const current = adviceOr404(existing, adviceId);
+
+  const advice = buildAdvice((req.body ?? {}) as Record<string, unknown>, existing, current);
+  const po = normalizePurchaseOrder({
+    ...existing,
+    paymentAdvices: existing.paymentAdvices.map((a) => (a._id === adviceId ? advice : a)),
+    updatedAt: new Date(),
+  });
+
+  await repo.replace(po);
+  res.json({ success: true, message: "Payment advice updated", data: toApi(po) });
+}
+
+/* DELETE /api/purchase-orders/:id/payment-advices/:adviceId */
+export async function deletePaymentAdvice(req: Request, res: Response): Promise<void> {
+  const existing = await loadOr404(req);
+  const adviceId = String(req.params.adviceId ?? "");
+  adviceOr404(existing, adviceId);
+
+  const po = normalizePurchaseOrder({
+    ...existing,
+    paymentAdvices: existing.paymentAdvices.filter((a) => a._id !== adviceId),
+    updatedAt: new Date(),
+  });
+
+  await repo.replace(po);
+  res.json({ success: true, message: "Payment advice deleted", data: toApi(po) });
+}
+
+/* GET /api/purchase-orders/:id/payment-advices/:adviceId/pdf */
+export async function getPaymentAdvicePdf(req: Request, res: Response): Promise<void> {
+  const po = await loadOr404(req);
+  const advice = adviceOr404(po, String(req.params.adviceId ?? ""));
+
+  const pdf = await buildPaymentAdvicePdf(toApi(po), advice);
+  const safe = `${po.poNumber}-${advice.invoiceNumber || "advice"}`.replace(/[^A-Za-z0-9._-]/g, "-");
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="Payment-Advice-${safe}.pdf"`);
+  res.send(pdf);
 }
 
 /* ------------------------------------------------------------------ */

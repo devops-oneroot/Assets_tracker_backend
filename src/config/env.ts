@@ -67,6 +67,11 @@ export const env = {
   // the rest of the app has nothing to do with it.
   gemini: {
     apiKey: process.env.GEMINI_API_KEY?.trim() ?? "",
-    model: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+    // An alias, so Google's renames don't strand us the way gemini-2.0-flash
+    // and gemini-2.5-flash both did. "lite" because the free tier rations the
+    // premium models hard (gemini-3.6-flash: 20 documents a day) while the
+    // small ones read an invoice just as accurately, several times faster.
+    // utils/geminiDoc.ts falls through to others if this one cannot serve.
+    model: process.env.GEMINI_MODEL?.trim() || "gemini-flash-lite-latest",
   },
 };

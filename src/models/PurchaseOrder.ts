@@ -68,6 +68,91 @@ export interface SupplierDoc extends PartyDoc {
   email: string;
 }
 
+/**
+ * One payment advice raised against this order.
+ *
+ * An order can carry several - a vendor billing in stages gets one per
+ * invoice, which is what the previous/present supply columns are for: each
+ * advice records what had been billed before it and what this invoice adds.
+ *
+ * The parties and order values are copied from the order when an advice is
+ * first raised, then kept here, because an advice is a record of what was
+ * certified on the day. Editing the order later must not rewrite a payment
+ * already recommended and signed.
+ */
+export interface PaymentAdviceDoc {
+  _id: string;
+
+  /** Supplier block - defaults from the order, but the PAN is only ever here. */
+  supplierName: string;
+  supplierAddress: string;
+  supplierGstNumber: string;
+  supplierPan: string;
+
+  /** The site/project being billed against. */
+  projectName: string;
+  projectAddress: string;
+  projectGstNumber: string;
+  projectPan: string;
+
+  creditPeriod: string;
+  natureOfSupply: string;
+  paymentTerms: string;
+
+  invoiceNumber: string;
+  invoiceDate: Date | null;
+  invoiceReceivedDate: Date | null;
+  paymentDueDate: Date | null;
+
+  originalPoValue: number;
+  amendedPoValue: number;
+  finalPoValue: number;
+
+  previousBillDate: Date | null;
+  previousValueOfSupply: number;
+  presentBillDate: Date | null;
+  presentValueOfSupply: number;
+  valueOfTax: number;
+  percentOfSupply: number;
+
+  /** Deductions, each subtracted from the bill to reach what is actually paid. */
+  tds: number;
+  advancePaid: number;
+  debits: number;
+  retention: number;
+  holdOther: number;
+
+  paymentRecommend: string;
+  preparedBy: string;
+  checkedBy: string;
+  approvedBy: string;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Derived money for an advice - recomputed on read, never trusted from the client. */
+export interface PaymentAdviceTotals {
+  totalInvoiceValue: number;
+  totalBillValue: number;
+  totalDeductions: number;
+  balancePayable: number;
+}
+
+export function computeAdviceTotals(a: PaymentAdviceDoc): PaymentAdviceTotals {
+  const totalInvoiceValue = round2(a.presentValueOfSupply + a.valueOfTax);
+  const totalDeductions = round2(
+    a.tds + a.advancePaid + a.debits + a.retention + a.holdOther
+  );
+
+  return {
+    totalInvoiceValue,
+    totalBillValue: totalInvoiceValue,
+    totalDeductions,
+    balancePayable: round2(totalInvoiceValue - totalDeductions),
+  };
+}
+
 export interface PurchaseOrderRaw {
   /** Buying company — the DynamoDB partition key. */
   entity: string;
@@ -113,6 +198,8 @@ export interface PurchaseOrderRaw {
   notes: string;
   /** Quotes, proposals, signed copies. */
   attachments: StoredFileDoc[];
+  /** Payment advices raised against this order, oldest first. */
+  paymentAdvices: PaymentAdviceDoc[];
 
   createdAt: Date;
   updatedAt: Date;
@@ -226,6 +313,58 @@ export function normalizePurchaseOrder(raw: Record<string, unknown>): PurchaseOr
     attachments: Array.isArray(raw.attachments)
       ? raw.attachments.map(asFile).filter((f): f is StoredFileDoc => !!f)
       : [],
+    paymentAdvices: asArray(raw.paymentAdvices).map(normalizePaymentAdvice),
+
+    createdAt: asDate(raw.createdAt) ?? new Date(),
+    updatedAt: asDate(raw.updatedAt) ?? new Date(),
+  };
+}
+
+/** Fills out one payment advice: every field present, dates revived, money numeric. */
+export function normalizePaymentAdvice(raw: Record<string, unknown>): PaymentAdviceDoc {
+  return {
+    _id: str(raw._id) || newId(),
+
+    supplierName: str(raw.supplierName),
+    supplierAddress: str(raw.supplierAddress),
+    supplierGstNumber: str(raw.supplierGstNumber).toUpperCase(),
+    supplierPan: str(raw.supplierPan).toUpperCase(),
+
+    projectName: str(raw.projectName),
+    projectAddress: str(raw.projectAddress),
+    projectGstNumber: str(raw.projectGstNumber).toUpperCase(),
+    projectPan: str(raw.projectPan).toUpperCase(),
+
+    creditPeriod: str(raw.creditPeriod),
+    natureOfSupply: str(raw.natureOfSupply),
+    paymentTerms: str(raw.paymentTerms),
+
+    invoiceNumber: str(raw.invoiceNumber),
+    invoiceDate: asDate(raw.invoiceDate),
+    invoiceReceivedDate: asDate(raw.invoiceReceivedDate),
+    paymentDueDate: asDate(raw.paymentDueDate),
+
+    originalPoValue: num(raw.originalPoValue),
+    amendedPoValue: num(raw.amendedPoValue),
+    finalPoValue: num(raw.finalPoValue),
+
+    previousBillDate: asDate(raw.previousBillDate),
+    previousValueOfSupply: num(raw.previousValueOfSupply),
+    presentBillDate: asDate(raw.presentBillDate),
+    presentValueOfSupply: num(raw.presentValueOfSupply),
+    valueOfTax: num(raw.valueOfTax),
+    percentOfSupply: num(raw.percentOfSupply),
+
+    tds: num(raw.tds),
+    advancePaid: num(raw.advancePaid),
+    debits: num(raw.debits),
+    retention: num(raw.retention),
+    holdOther: num(raw.holdOther),
+
+    paymentRecommend: str(raw.paymentRecommend),
+    preparedBy: str(raw.preparedBy),
+    checkedBy: str(raw.checkedBy),
+    approvedBy: str(raw.approvedBy),
 
     createdAt: asDate(raw.createdAt) ?? new Date(),
     updatedAt: asDate(raw.updatedAt) ?? new Date(),
@@ -378,11 +517,14 @@ export function parseId(id: string): { entity: string; poNumber: string } {
 
 export type PoItemApi = PoItemDoc & { label: string; amount: number };
 
+export type PaymentAdviceApi = PaymentAdviceDoc & { totals: PaymentAdviceTotals };
+
 export type PurchaseOrderApi = PurchaseOrderRaw & {
   _id: string;
   id: string;
   totals: PoTotals;
   items: PoItemApi[];
+  paymentAdvices: PaymentAdviceApi[];
 };
 
 /** The API response shape: the stored order plus its derived money and labels. */
@@ -400,5 +542,6 @@ export function toApi(po: PurchaseOrderRaw): PurchaseOrderApi {
       label: labels[i] ?? String(i + 1),
       amount: lineAmount(item),
     })),
+    paymentAdvices: po.paymentAdvices.map((a) => ({ ...a, totals: computeAdviceTotals(a) })),
   };
 }
